@@ -1,5 +1,5 @@
 import React, { Component } from "react";
-// import * as Sentry from "@sentry/react";
+import * as Sentry from "@sentry/react";
 import "./App.css";
 import wrenchImg from "../assets/wrench.png";
 import nailsImg from "../assets/nails.png";
@@ -7,16 +7,53 @@ import hammerImg from "../assets/hammer.png";
 
 const monify = (n) => (n / 100).toFixed(2);
 const getUniqueId = () => "_" + Math.random().toString(36).substring(2, 9);
+const routes = {
+  home: "/",
+  pricingError: "/pricing-error",
+  inventoryError: "/inventory-error",
+  logTest: "/log-test",
+};
+const loremWords = [
+  "lorem",
+  "ipsum",
+  "dolor",
+  "sit",
+  "amet",
+  "consectetur",
+  "adipiscing",
+  "elit",
+  "sed",
+  "do",
+  "eiusmod",
+  "tempor",
+  "incididunt",
+  "labore",
+  "magna",
+  "aliqua",
+];
+const getRandomLogMessage = () => {
+  const wordCount = 5 + Math.floor(Math.random() * 7);
+  return Array.from({ length: wordCount }, () => {
+    return loremWords[Math.floor(Math.random() * loremWords.length)];
+  }).join(" ");
+};
 
 class App extends Component {
   constructor(props) {
     super(props);
     this.state = {
       cart: [],
+      lastLogMessage: "",
     };
 
-    // generate random email
-    this.email = Math.random().toString(36).substring(2, 6) + "@yahoo.com";
+    const params = new URLSearchParams(window.location.search);
+    const sessionName =
+      params.get("name") || Math.random().toString(36).substring(2, 6);
+    this.user = {
+      id: sessionName,
+      username: sessionName,
+    };
+    this.currentRoute = window.location.pathname;
 
     this.store = [
       {
@@ -41,21 +78,27 @@ class App extends Component {
     this.buyItem = this.buyItem.bind(this);
     this.checkout = this.checkout.bind(this);
     this.resetCart = this.resetCart.bind(this);
+    this.triggerPricingError = this.triggerPricingError.bind(this);
+    this.triggerInventoryError = this.triggerInventoryError.bind(this);
+    this.sendTestLog = this.sendTestLog.bind(this);
   }
 
   componentDidMount() {
     const defaultError = window.onerror;
-    window.onerror = (error) => {
+    window.onerror = (...args) => {
       this.setState({ hasError: true, success: false });
-      defaultError(error);
+      if (defaultError) {
+        return defaultError(...args);
+      }
+      return false;
     };
 
     // Add context to error/event
     // View this data in "Tags"
-    // Sentry.configureScope((scope) => {
-    //   scope.setUser({ email: this.email }); // attach user/email context
-    //   scope.setTag("customerType", "medium-plan"); // custom-tag
-    // });
+    Sentry.setUser(this.user); // attach user context
+    Sentry.setTag("customerType", "medium-plan"); // custom-tag
+    Sentry.setTag("session_name", this.user.username);
+    Sentry.setTag("route", this.currentRoute);
   }
 
   buyItem(item) {
@@ -97,7 +140,7 @@ class App extends Component {
     this.myCodeIsMorePerfect();
 
     const order = {
-      email: this.email,
+      user: this.user.username,
       cart: this.state.cart,
     };
 
@@ -137,7 +180,80 @@ class App extends Component {
     // );
   }
 
-  render() {
+  triggerPricingError() {
+    throw new Error("PricingError: discount code lookup failed");
+  }
+
+  triggerInventoryError() {
+    const item = undefined;
+    item.quantityAvailable.toString();
+  }
+
+  sendTestLog() {
+    const message = getRandomLogMessage();
+    Sentry.logger.info(message, { log_source: "sentry_test" });
+    this.setState({ lastLogMessage: message });
+  }
+
+  routeWithSession(route) {
+    return `${route}${window.location.search}`;
+  }
+
+  renderNav() {
+    return (
+      <nav className="route-nav">
+        <a href={this.routeWithSession(routes.home)}>Store</a>
+        <a href={this.routeWithSession(routes.pricingError)}>Pricing error</a>
+        <a href={this.routeWithSession(routes.inventoryError)}>
+          Inventory error
+        </a>
+        <a href={this.routeWithSession(routes.logTest)}>Log test</a>
+      </nav>
+    );
+  }
+
+  renderErrorRoute({ title, description, buttonLabel, onClick }) {
+    return (
+      <div className="App">
+        <main>
+          <header>
+            <h1>{title}</h1>
+          </header>
+          {this.renderNav()}
+          <section className="demo-route">
+            <p>{description}</p>
+            <button onClick={onClick}>{buttonLabel}</button>
+          </section>
+        </main>
+        {this.renderSidebar()}
+      </div>
+    );
+  }
+
+  renderLogRoute() {
+    return (
+      <div className="App">
+        <main>
+          <header>
+            <h1>Log Test</h1>
+          </header>
+          {this.renderNav()}
+          <section className="demo-route">
+            <p>This route sends a random lorem ipsum string to Sentry logs.</p>
+            <button onClick={this.sendTestLog}>Send test log</button>
+            {this.state.lastLogMessage && (
+              <p className="last-log-message">
+                Last log: {this.state.lastLogMessage}
+              </p>
+            )}
+          </section>
+        </main>
+        {this.renderSidebar()}
+      </div>
+    );
+  }
+
+  renderSidebar() {
     const total = this.state.cart.reduce((t, i) => t + i.price, 0);
     const cartDisplay = this.state.cart.reduce((c, { id }) => {
       c[id] = c[id] ? c[id] + 1 : 1;
@@ -145,11 +261,85 @@ class App extends Component {
     }, {});
 
     return (
+      <div className="sidebar">
+        <header>
+          <h4>Hi, {this.user.username}!</h4>
+        </header>
+        <div className="cart">
+          {this.state.cart.length ? (
+            <div>
+              {Object.keys(cartDisplay).map((id) => {
+                const { name, price } = this.store.find((i) => i.id === id);
+                const qty = cartDisplay[id];
+                return (
+                  <div className="cart-item" key={id}>
+                    <div className="cart-item-name">
+                      {name} x{qty}
+                    </div>
+                    <div className="cart-item-price">${monify(price * qty)}</div>
+                  </div>
+                );
+              })}
+              <hr />
+              <div className="cart-item">
+                <div className="cart-item-name">
+                  <strong>Total</strong>
+                </div>
+                <div className="cart-item-price">
+                  <strong>${monify(total)}</strong>
+                </div>
+              </div>
+            </div>
+          ) : (
+            "Your cart is empty"
+          )}
+        </div>
+        {this.state.hasError && <p className="cart-error">Something went wrong</p>}
+        {this.state.success && (
+          <p className="cart-success">Thank you for your purchase!</p>
+        )}
+        <button onClick={this.checkout} disabled={this.state.cart.length === 0}>
+          Checkout
+        </button>{" "}
+        {this.state.cart.length > 0 && (
+          <button onClick={this.resetCart} className="cart-reset">
+            Empty cart
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  render() {
+    if (this.currentRoute === routes.pricingError) {
+      return this.renderErrorRoute({
+        title: "Pricing Error Demo",
+        description: "This route throws a custom pricing error.",
+        buttonLabel: "Trigger pricing error",
+        onClick: this.triggerPricingError,
+      });
+    }
+
+    if (this.currentRoute === routes.inventoryError) {
+      return this.renderErrorRoute({
+        title: "Inventory Error Demo",
+        description: "This route throws a JavaScript TypeError.",
+        buttonLabel: "Trigger inventory error",
+        onClick: this.triggerInventoryError,
+      });
+    }
+
+    if (this.currentRoute === routes.logTest) {
+      return this.renderLogRoute();
+    }
+
+    return (
       <div className="App">
         <main>
           <header>
             <h1>Online Hardware Store</h1>
           </header>
+          {this.renderNav()}
 
           <div className="inventory">
             {this.store.map((item) => {
@@ -169,59 +359,7 @@ class App extends Component {
             })}
           </div>
         </main>
-        <div className="sidebar">
-          <header>
-            <h4>Hi, {this.email}!</h4>
-          </header>
-          <div className="cart">
-            {this.state.cart.length ? (
-              <div>
-                {Object.keys(cartDisplay).map((id) => {
-                  const { name, price } = this.store.find((i) => i.id === id);
-                  const qty = cartDisplay[id];
-                  return (
-                    <div className="cart-item" key={id}>
-                      <div className="cart-item-name">
-                        {name} x{qty}
-                      </div>
-                      <div className="cart-item-price">
-                        ${monify(price * qty)}
-                      </div>
-                    </div>
-                  );
-                })}
-                <hr />
-                <div className="cart-item">
-                  <div className="cart-item-name">
-                    <strong>Total</strong>
-                  </div>
-                  <div className="cart-item-price">
-                    <strong>${monify(total)}</strong>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              "Your cart is empty"
-            )}
-          </div>
-          {this.state.hasError && (
-            <p className="cart-error">Something went wrong</p>
-          )}
-          {this.state.success && (
-            <p className="cart-success">Thank you for your purchase!</p>
-          )}
-          <button
-            onClick={this.checkout}
-            disabled={this.state.cart.length === 0}
-          >
-            Checkout
-          </button>{" "}
-          {this.state.cart.length > 0 && (
-            <button onClick={this.resetCart} className="cart-reset">
-              Empty cart
-            </button>
-          )}
-        </div>
+        {this.renderSidebar()}
       </div>
     );
   }

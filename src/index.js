@@ -7,7 +7,6 @@ import * as Sentry from "@sentry/react";
 
 Sentry.init({
   dsn: "https://6f055a19fab3609dc0ec847067b85aec@o4511271670644736.ingest.us.sentry.io/4511271740571648",
-  integrations: [new Sentry.BrowserTracing({}), new Sentry.Replay()],
 
   // Set tracesSampleRate to 1.0 to capture 100%
   // of transactions for performance monitoring.
@@ -17,6 +16,14 @@ Sentry.init({
   // plus for 100% of sessions with an error
   replaysSessionSampleRate: 0.1,
   replaysOnErrorSampleRate: 1.0,
+  integrations: [
+    // send console.log, console.warn, and console.error calls as logs to Sentry
+    Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration(),
+  ],
+  // Enable logs to be sent to Sentry
+  enableLogs: true,
 });
 
 const container = document.getElementById("root");
